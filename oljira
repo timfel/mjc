@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "bundler/setup"
+require "mechanize"
+
+
+class JiraHandler
+  def initialize(issue, options)
+    @verbose = !!options[:verbose]
+    @start = !!options[:start]
+    @issue = issue
+  end
+
+  def log(*args)
+    puts args if @verbose
+  end
+
+  def go
+    agent = Mechanize.new do |agent|
+      agent.user_agent_alias = 'Mac Safari'
+      agent.follow_meta_refresh = true
+    end
+
+    agent.get("http://ol-jira.us.oracle.com/browse/#{@issue}") do |page|
+      log(page.uri)
+      sso_page = page.form_with(:name => "myForm")&.submit || page
+      log(sso_page.uri)
+
+      jira_page = sso_page.form_with(:name => "LoginForm") do |login_form|
+        if login_form
+          login_form.field_with(:name => "ssousername").value = "tim.felgentreff@oracle.com"
+          login_form.field_with(:name => "password").value = "zhwdb7RHPN"
+        end
+      end&.submit || sso_page
+      log(jira_page.uri)
+
+      if !jira_page.uri.to_s.end_with?(@issue)
+        puts "Error: No such issue #{@issue}"
+      elsif @start
+        system "git checkout -b topic/#{@issue}"
+        system "git branch --set-upstream-to=origin/topic/#{issue} topic/#{issue}"
+        log("Starting progress")
+        jira_page.link_with("Start Progress")&.click
+        log("Assigning to me")
+        jira_page.link_with("Assign to me")&.click
+      else
+        puts jira_page.at("#summary-val").text
+      end
+      # jira_page.link_with("Resolve Issue")
+      # jira_page.link_with("Start Progress")
+      # jira_page.link_with("Create branch")
+      # jira_page.link_with("Create")
+    end
+  end
+
+  def self.handle_commandline
+    options = {}
+    opt_object = nil
+    OptionParser.new do |opts|
+      opts.banner = "Usage: oljira <issue_id> [options]"
+
+      opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
+        options[:verbose] = v
+      end
+
+      opts.on("-s", "--start", "Create a branch and start working on this issue.") do |v|
+        options[:start] = true
+      end
+
+      opts.on_tail("-h", "--help", "Show this message") do
+        puts opts
+        exit
+      end
+
+      opt_object = opts
+    end.parse!
+
+    issue = ARGV.shift
+
+    unless issue
+      `git rev-parse --abbrev-ref HEAD` =~ /(GR-\d+)/
+      issue = $1
+    end
+
+    unless issue && ARGV.empty?
+      puts opt_object
+      exit
+    end
+
+    return issue, options
+  end
+
+  def self.go
+    new(*self.handle_commandline).go
+  end
+end
+
+
+JiraHandler.go
