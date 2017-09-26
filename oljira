@@ -2,10 +2,13 @@
 
 require "optparse"
 require "io/console"
+require "json"
 
+require "pry"
 require "bundler/setup"
 require "mechanize"
 require "keyring"
+require "paint"
 
 
 class JiraHandler
@@ -47,7 +50,19 @@ class JiraHandler
   end
 
   def list(jira_page)
-    binding.pry
+    page = @agent.get("http://ol-jira.us.oracle.com/rest/api/latest/search?jql=assignee=currentuser()")
+    results = JSON.parse(page.body)
+    results["issues"].each do |issue|
+      i = issue["fields"]
+      key = issue["key"]
+      begin
+        key = Paint[key, i["status"]["statusCategory"]["colorName"].to_sym]
+      rescue
+        key = Paint[key, :white]
+      end
+      components = Paint["(#{i["components"].map { |c| c["name"] }.join(", ")})", "666"]
+      puts "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
+    end
   end
 
   def require_issue(jira_page)
@@ -79,25 +94,14 @@ class JiraHandler
   # jira_page.link_with("Create")
 
   def go
-    agent = Mechanize.new do |agent|
-      agent.user_agent_alias = 'Mac Safari'
+    @agent = Mechanize.new do |agent|
       agent.follow_meta_refresh = true
+      agent.add_auth("https://login.oracle.com", @username, @password)
     end
 
-    agent.get("http://ol-jira.us.oracle.com/browse/#{@issue}") do |page|
+    @agent.get("http://ol-jira.us.oracle.com/browse/#{@issue}") do |page|
       log(page.uri)
-      sso_page = page.form_with(:name => "myForm")&.submit || page
-      log(sso_page.uri)
-
-      jira_page = sso_page.form_with(:name => "LoginForm") do |login_form|
-        if login_form
-          login_form.field_with(:name => "ssousername").value = "tim.felgentreff@oracle.com"
-          login_form.field_with(:name => "password").value = "zhwdb7RHPN"
-        end
-      end&.submit || sso_page
-      log(jira_page.uri)
-
-      action(jira_page)
+      action(page)
     end
   end
 
