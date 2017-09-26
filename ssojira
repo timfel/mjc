@@ -4,7 +4,6 @@ require "optparse"
 require "io/console"
 require "json"
 
-require "pry"
 require "bundler/setup"
 require "mechanize"
 require "keyring"
@@ -16,6 +15,7 @@ class JiraHandler
   APP_KEYRING_USER = "ssojira-cli"
   PASSWORD_KEYRING_SERVICE = "ssojira-password"
   URL_KEYRING_SERVICE = "ssojira-url"
+  AUTH_DOMAIN_SERVICE = "ssojira-authdomain"
 
   def initialize(issue, options)
     @verbose = !!options[:verbose]
@@ -30,26 +30,22 @@ class JiraHandler
     @action = :show unless @action
   end
 
+  def get_secret(service, user, prompt, secret=true)
+    result = keyring.get_password(service, user)
+    if !result || options[:login]
+      print prompt
+      result = (secret ? STDIN.noecho(&:gets) : STDIN.gets).chomp
+      keyring.set_password(service, user, result)
+    end
+    result
+  end
+
   def login(options)
     keyring = Keyring.new
-    @url = keyring.get_password(URL_KEYRING_SERVICE, APP_KEYRING_USER)
-    if !@url || options[:login]
-      print "JIRA Url: "
-      @url = STDIN.gets.chomp
-      keyring.set_password(URL_KEYRING_SERVICE, APP_KEYRING_USER, @url)
-    end
-    @username = keyring.get_password(USERNAME_KEYRING_SERVICE, @url)
-    if !@username || options[:login]
-      print "Username: "
-      @username = STDIN.gets.chomp
-      keyring.set_password(USERNAME_KEYRING_SERVICE, @url, @username)
-    end
-    @password = keyring.get_password(PASSWORD_KEYRING_SERVICE, @username)
-    if !@password || options[:login]
-      print "Password (not printed): "
-      @password = STDIN.noecho(&:gets).chomp
-      keyring.set_password(PASSWORD_KEYRING_SERVICE, @username, @password)
-    end
+    @url = get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", secret=false)
+    @authdomain = get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", secret=false)
+    @username = get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", secret=false)
+    @password = get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", secret=true)
   end
 
   def log(*args)
@@ -113,15 +109,10 @@ class JiraHandler
     send @action, jira_page
   end
 
-  # jira_page.link_with("Resolve Issue")
-  # jira_page.link_with("Start Progress")
-  # jira_page.link_with("Create branch")
-  # jira_page.link_with("Create")
-
   def go
     @agent = Mechanize.new do |agent|
       agent.follow_meta_refresh = true
-      agent.add_auth("https://login.oracle.com", @username, @password)
+      agent.add_auth(@authdomain, @username, @password)
     end
 
     @agent.get("#{@url}/browse/#{@issue}") do |page|
