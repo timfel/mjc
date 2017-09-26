@@ -1,20 +1,82 @@
 #!/usr/bin/env ruby
 
 require "optparse"
+require "io/console"
+
 require "bundler/setup"
 require "mechanize"
+require "keyring"
 
 
 class JiraHandler
+  USERNAME_KEYRING_SERVICE = "oljira-user"
+  USERNAME_KEYRING_USER = "oljira-cli"
+  PASSWORD_KEYRING_SERVICE = "oljira-password"
+
   def initialize(issue, options)
     @verbose = !!options[:verbose]
-    @start = !!options[:start]
     @issue = issue
+    choose_action(options)
+    login(options)
+  end
+
+  def choose_action(options)
+    @action = :start if options[:start]
+    @action = :list if options[:list]
+    @action = :title unless @action
+  end
+
+  def login(options)
+    keyring = Keyring.new
+    @username = keyring.get_password(USERNAME_KEYRING_SERVICE, USERNAME_KEYRING_USER)
+    if !@username || options[:login]
+      print "Username: "
+      @username = STDIN.gets.chomp
+      keyring.set_password(USERNAME_KEYRING_SERVICE, USERNAME_KEYRING_USER, @username)
+    end
+    @password = keyring.get_password(PASSWORD_KEYRING_SERVICE, @username)
+    if !@password || options[:login]
+      print "Password (not printed): "
+      @password = STDIN.noecho(&:gets).chomp
+      keyring.set_password(PASSWORD_KEYRING_SERVICE, @username, @password)
+    end
   end
 
   def log(*args)
     puts args if @verbose
   end
+
+  def list(jira_page)
+    binding.pry
+  end
+
+  def require_issue(jira_page)
+    if !jira_page.uri.to_s.end_with?(@issue)
+      puts "Error: No such issue #{@issue}"
+      exit -1
+    end
+  end
+
+  def start(jira_page)
+    system "git checkout -b topic/#{@issue}"
+    log("Starting progress")
+    jira_page.link_with(:text => "Start Progress")&.click
+    log("Assigning to me")
+    jira_page.link_with(:text => "Assign to me")&.click
+  end
+
+  def title(jira_page)
+    puts jira_page.at("#summary-val").text
+  end
+
+  def action(jira_page)
+    send @action, jira_page
+  end
+
+  # jira_page.link_with("Resolve Issue")
+  # jira_page.link_with("Start Progress")
+  # jira_page.link_with("Create branch")
+  # jira_page.link_with("Create")
 
   def go
     agent = Mechanize.new do |agent|
@@ -35,22 +97,7 @@ class JiraHandler
       end&.submit || sso_page
       log(jira_page.uri)
 
-      if !jira_page.uri.to_s.end_with?(@issue)
-        puts "Error: No such issue #{@issue}"
-      elsif @start
-        system "git checkout -b topic/#{@issue}"
-        system "git branch --set-upstream-to=origin/topic/#{issue} topic/#{issue}"
-        log("Starting progress")
-        jira_page.link_with("Start Progress")&.click
-        log("Assigning to me")
-        jira_page.link_with("Assign to me")&.click
-      else
-        puts jira_page.at("#summary-val").text
-      end
-      # jira_page.link_with("Resolve Issue")
-      # jira_page.link_with("Start Progress")
-      # jira_page.link_with("Create branch")
-      # jira_page.link_with("Create")
+      action(jira_page)
     end
   end
 
@@ -66,6 +113,14 @@ class JiraHandler
 
       opts.on("-s", "--start", "Create a branch and start working on this issue.") do |v|
         options[:start] = true
+      end
+
+      opts.on("-l", "--list", "List issues assigned to me.") do |v|
+        options[:list] = true
+      end
+
+      opts.on("-a", "--authenticate", "Ask (again) for username and password.") do |v|
+        options[:login] = true
       end
 
       opts.on_tail("-h", "--help", "Show this message") do

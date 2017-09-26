@@ -1,4 +1,6 @@
 source 'https://rubygems.org'
 
 gem 'mechanize'
-gem 'pry'
+gem 'keyring'
+
+gem 'pry', group: :development
