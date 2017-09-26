@@ -30,22 +30,22 @@ class JiraHandler
     @action = :show unless @action
   end
 
-  def get_secret(service, user, prompt, secret=true)
-    result = keyring.get_password(service, user)
+  def get_secret(service, user, prompt, options, secret=true)
+    result = @keyring.get_password(service, user)
     if !result || options[:login]
       print prompt
       result = (secret ? STDIN.noecho(&:gets) : STDIN.gets).chomp
-      keyring.set_password(service, user, result)
+      @keyring.set_password(service, user, result)
     end
     result
   end
 
   def login(options)
-    keyring = Keyring.new
-    @url = get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", secret=false)
-    @authdomain = get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", secret=false)
-    @username = get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", secret=false)
-    @password = get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", secret=true)
+    @keyring = Keyring.new
+    @url = get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", options, secret=false)
+    @authdomain = get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", options, secret=false)
+    @username = get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", options, secret=false)
+    @password = get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", options, secret=true)
   end
 
   def log(*args)
