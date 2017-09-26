@@ -12,9 +12,10 @@ require "paint"
 
 
 class JiraHandler
-  USERNAME_KEYRING_SERVICE = "oljira-user"
-  USERNAME_KEYRING_USER = "oljira-cli"
-  PASSWORD_KEYRING_SERVICE = "oljira-password"
+  USERNAME_KEYRING_SERVICE = "ssojira-user"
+  APP_KEYRING_USER = "ssojira-cli"
+  PASSWORD_KEYRING_SERVICE = "ssojira-password"
+  URL_KEYRING_SERVICE = "ssojira-url"
 
   def initialize(issue, options)
     @verbose = !!options[:verbose]
@@ -31,11 +32,17 @@ class JiraHandler
 
   def login(options)
     keyring = Keyring.new
-    @username = keyring.get_password(USERNAME_KEYRING_SERVICE, USERNAME_KEYRING_USER)
+    @url = keyring.get_password(URL_KEYRING_SERVICE, APP_KEYRING_USER)
+    if !@url || options[:login]
+      print "JIRA Url: "
+      @url = STDIN.gets.chomp
+      keyring.set_password(URL_KEYRING_SERVICE, APP_KEYRING_USER, @url)
+    end
+    @username = keyring.get_password(USERNAME_KEYRING_SERVICE, @url)
     if !@username || options[:login]
       print "Username: "
       @username = STDIN.gets.chomp
-      keyring.set_password(USERNAME_KEYRING_SERVICE, USERNAME_KEYRING_USER, @username)
+      keyring.set_password(USERNAME_KEYRING_SERVICE, @url, @username)
     end
     @password = keyring.get_password(PASSWORD_KEYRING_SERVICE, @username)
     if !@password || options[:login]
@@ -127,7 +134,7 @@ class JiraHandler
     options = {}
     opt_object = nil
     OptionParser.new do |opts|
-      opts.banner = "Usage: oljira <issue_id> [options]"
+      opts.banner = "Usage: ssojira <issue_id> [options]"
 
       opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
         options[:verbose] = v
