@@ -57,7 +57,7 @@ class JiraHandler
   end
 
   def list(jira_page)
-    page = @agent.get("http://ol-jira.us.oracle.com/rest/api/latest/search?jql=assignee=currentuser()")
+    page = @agent.get("#{@url}/rest/api/latest/search?jql=assignee=currentuser()")
     results = JSON.parse(page.body)
     results["issues"].each do |issue|
       print_issue(issue)
@@ -104,7 +104,7 @@ class JiraHandler
   end
 
   def show(jira_page)
-    page = @agent.get("http://ol-jira.us.oracle.com/rest/api/latest/search?jql=key=#{@issue}&fields=*all")
+    page = @agent.get("#{@url}/rest/api/latest/search?jql=key=#{@issue}&fields=*all")
     results = JSON.parse(page.body)
     print_issue(results["issues"][0], detailed = true)
   end
@@ -124,7 +124,7 @@ class JiraHandler
       agent.add_auth("https://login.oracle.com", @username, @password)
     end
 
-    @agent.get("http://ol-jira.us.oracle.com/browse/#{@issue}") do |page|
+    @agent.get("#{@url}/browse/#{@issue}") do |page|
       log(page.uri)
       action(page)
     end
