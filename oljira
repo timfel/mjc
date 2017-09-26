@@ -26,7 +26,7 @@ class JiraHandler
   def choose_action(options)
     @action = :start if options[:start]
     @action = :list if options[:list]
-    @action = :title unless @action
+    @action = :show unless @action
   end
 
   def login(options)
@@ -53,15 +53,31 @@ class JiraHandler
     page = @agent.get("http://ol-jira.us.oracle.com/rest/api/latest/search?jql=assignee=currentuser()")
     results = JSON.parse(page.body)
     results["issues"].each do |issue|
-      i = issue["fields"]
-      key = issue["key"]
-      begin
-        key = Paint[key, i["status"]["statusCategory"]["colorName"].to_sym]
-      rescue
-        key = Paint[key, :white]
+      print_issue(issue)
+    end
+  end
+
+  def print_issue(issue, detailed = false)
+    i = issue["fields"]
+    key = issue["key"]
+    begin
+      key = Paint[key, i["status"]["statusCategory"]["colorName"].to_sym]
+    rescue
+      key = Paint[key, :white]
+    end
+    components = Paint["(#{i["components"].map { |c| c["name"] }.join(", ")})", "666"]
+    puts "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
+
+    if detailed
+      if i['description']
+        puts Paint["#{i['description']}\n", :white]
       end
-      components = Paint["(#{i["components"].map { |c| c["name"] }.join(", ")})", "666"]
-      puts "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
+
+      (i["comment"]&.[]("comments") || []).each do |comment|
+        author = Paint["#{comment['author']['displayName']}", :white]
+        body = Paint[comment['body']]
+        puts "#{author}: #{body}\n\n"
+      end
     end
   end
 
@@ -80,8 +96,10 @@ class JiraHandler
     jira_page.link_with(:text => "Assign to me")&.click
   end
 
-  def title(jira_page)
-    puts jira_page.at("#summary-val").text
+  def show(jira_page)
+    page = @agent.get("http://ol-jira.us.oracle.com/rest/api/latest/search?jql=key=#{@issue}&fields=*all")
+    results = JSON.parse(page.body)
+    print_issue(results["issues"][0], detailed = true)
   end
 
   def action(jira_page)
