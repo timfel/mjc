@@ -33,10 +33,11 @@ class JiraHandler
     @action = :start if options[:start]
     @action = :list if options[:list]
     @action = :pull_request if options[:pr]
+    @action = :comment if options[:comment]
     @action = :show unless @action
   end
 
-  @@requires_issue = [:start, :show, :pull_request]
+  @@requires_issue = [:start, :show, :pull_request, :comment]
 
   def get_secret(service, user, prompt, options, secret=true)
     result = @keyring.get_password(service, user)
@@ -93,12 +94,23 @@ class JiraHandler
       command_success = system("open #{prurl}")
     end
     puts "Open a PR at: #{prurl}" unless command_success
-    comment_form = jira_page.form_with(action: /AddComment/)
-    comment_text = comment_form.field_with(name: "comment")
     print "Enter pull-request ID (or nothing to cancel posting PR as a comment): "
     id = STDIN.gets.chomp
     return if id.empty?
-    comment_text.value = "Pull request: #{origin_url}/pull-requests/#{id}/overview"
+    post_comment(jira_page, "Pull request: #{origin_url}/pull-requests/#{id}/overview")
+  end
+
+  def comment(jira_page)
+    print "Enter one-line comment (or nothing to cancel): "
+    comment = STDIN.gets.chomp
+    return if comment.empty?
+    post_comment(jira_page, comment)
+  end
+
+  def post_comment(jira_page, comment)
+    comment_form = jira_page.form_with(action: /AddComment/)
+    comment_text = comment_form.field_with(name: "comment")
+    comment_text.value = comment
     comment_form.submit
   end
 
@@ -192,6 +204,10 @@ class JiraHandler
         options[:pr] = true
       end
 
+      opts.on("-c", "--comment", "Post a comment") do |v|
+        options[:comment] = true
+      end
+
       opts.on_tail("-h", "--help", "Show this message") do
         puts opts
         exit
@@ -207,7 +223,7 @@ class JiraHandler
       issue = $1
     end
 
-    unless issue && ARGV.empty?
+    if !issue && options.empty?
       puts opt_object
       exit
     end
