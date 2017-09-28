@@ -9,6 +9,11 @@ require "mechanize"
 require "keyring"
 require "paint"
 
+begin
+  require "pry"
+rescue LoadError
+end
+
 
 class JiraHandler
   USERNAME_KEYRING_SERVICE = "ssojira-user"
@@ -27,8 +32,11 @@ class JiraHandler
   def choose_action(options)
     @action = :start if options[:start]
     @action = :list if options[:list]
+    @action = :pull_request if options[:pr]
     @action = :show unless @action
   end
+
+  @@requires_issue = [:start, :show, :pull_request]
 
   def get_secret(service, user, prompt, options, secret=true)
     result = @keyring.get_password(service, user)
@@ -60,6 +68,40 @@ class JiraHandler
     end
   end
 
+  def pull_request(jira_page)
+    origin_url = `git remote get-url origin`.chomp
+    branches = `git branch --list`
+    branches =~ /\s([^ ]+#{@issue}[^ ]+)/
+    branch = $1
+    if branch.nil?
+      puts "Could not find branch for issue #{@issue}"
+      exit -1
+    end
+    # switch to http(s)
+    origin_url.sub!(/^ssh:\/\/([a-zA-Z0-9_]+@)?/, "https://")
+    # remove ssh port
+    origin_url.sub!(/:[0-9]+/, "")
+    # transform repo path
+    origin_url.sub!(/\/(?<project>\w+)\/(?<repo>[a-zA-Z0-9\-_]+)(\.git)?$/, '/projects/\k<project>/repos/\k<repo>')
+    prurl = "#{origin_url}/compare/commits?sourceBranch=refs/heads/#{branch}"
+    command_success = false
+    if RUBY_PLATFORM =~ /linux/
+      command_success = system("xdg-open #{prurl}")
+    elsif RUBY_PLATFORM =~ /windows/
+      command_success = system("start #{prurl}")
+    elsif RUBY_PLATFORM =~ /darwin/
+      command_success = system("open #{prurl}")
+    end
+    puts "Open a PR at: #{prurl}" unless command_success
+    comment_form = jira_page.form_with(action: /AddComment/)
+    comment_text = comment_form.field_with(name: "comment")
+    print "Enter pull-request ID (or nothing to cancel posting PR as a comment): "
+    id = STDIN.gets.chomp
+    return if id.empty?
+    comment_text.value = "Pull request: #{origin_url}/pull-requests/#{id}/overview"
+    comment_form.submit
+  end
+
   def print_issue(issue, detailed = false)
     i = issue["fields"]
     key = issue["key"]
@@ -72,6 +114,8 @@ class JiraHandler
     puts "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
 
     if detailed
+      puts "#{@url}/browse/#{@issue}"
+
       if i['description']
         puts Paint["#{i['description']}\n", :white]
       end
@@ -106,6 +150,7 @@ class JiraHandler
   end
 
   def action(jira_page)
+    require_issue(jira_page) if @@requires_issue.include? @action
     send @action, jira_page
   end
 
@@ -141,6 +186,10 @@ class JiraHandler
 
       opts.on("-a", "--authenticate", "Ask (again) for username and password.") do |v|
         options[:login] = true
+      end
+
+      opts.on("-p", "--pull-request", "Open a PR for this issue") do |v|
+        options[:pr] = true
       end
 
       opts.on_tail("-h", "--help", "Show this message") do
