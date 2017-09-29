@@ -21,27 +21,33 @@ class JiraHandler
   PASSWORD_KEYRING_SERVICE = "ssojira-password"
   URL_KEYRING_SERVICE = "ssojira-url"
   AUTH_DOMAIN_SERVICE = "ssojira-authdomain"
+  DEFAULT_ACTION = :show
 
-  def initialize(issue, options)
-    @verbose = !!options[:verbose]
-    @issue = issue
-    choose_action(options)
-    login(options)
-  end
+  attr_accessor :issue, :action, :verbose
 
-  def choose_action(options)
-    @action = :start if options[:start]
-    @action = :list if options[:list]
-    @action = :pull_request if options[:pr]
-    @action = :comment if options[:comment]
-    @action = :show unless @action
+  def initialize
+    @verbose = false
+    @action = DEFAULT_ACTION
   end
 
   @@requires_issue = [:start, :show, :pull_request, :comment]
 
-  def get_secret(service, user, prompt, options, secret=true)
+  def action=(symbol)
+    if action == DEFAULT_ACTION
+      @action = symbol
+    else
+      error "Multiple actions given: #{action.to_s} and #{symbol.to_s}"
+    end
+  end
+
+  def error(str)
+    puts str
+    exit -1
+  end
+
+  def get_secret(service, user, prompt, force, secret=true)
     result = @keyring.get_password(service, user)
-    if !result || options[:login]
+    if !result || force
       print prompt
       result = (secret ? STDIN.noecho(&:gets) : STDIN.gets).chomp
       @keyring.set_password(service, user, result)
@@ -49,16 +55,16 @@ class JiraHandler
     result
   end
 
-  def login(options)
-    @keyring = Keyring.new
-    @url = get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", options, secret=false)
-    @authdomain = get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", options, secret=false)
-    @username = get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", options, secret=false)
-    @password = get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", options, secret=true)
+  def login(force = false)
+    @keyring ||= Keyring.new
+    @url ||= get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", force, secret=false)
+    @authdomain ||= get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", force, secret=false)
+    @username ||= get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", force, secret=false)
+    @password ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", force, secret=true)
   end
 
   def log(*args)
-    puts args if @verbose
+    puts args if verbose
   end
 
   def list(jira_page)
@@ -75,8 +81,7 @@ class JiraHandler
     branches =~ /\s([^ ]+#{@issue}[^ ]+)/
     branch = $1
     if branch.nil?
-      puts "Could not find branch for issue #{@issue}"
-      exit -1
+      error "Could not find branch for issue #{@issue}"
     end
     # switch to http(s)
     origin_url.sub!(/^ssh:\/\/([a-zA-Z0-9_]+@)?/, "https://")
@@ -141,10 +146,8 @@ class JiraHandler
   end
 
   def require_issue(jira_page)
-    if !jira_page.uri.to_s.end_with?(@issue)
-      puts "Error: No such issue #{@issue}"
-      exit -1
-    end
+    error "No issue given" if @issue.nil?
+    error "No such issue #{@issue}" unless jira_page.uri.to_s.end_with?(@issue)
   end
 
   def start(jira_page)
@@ -161,12 +164,31 @@ class JiraHandler
     print_issue(results["issues"][0], detailed = true)
   end
 
-  def action(jira_page)
-    require_issue(jira_page) if @@requires_issue.include? @action
-    send @action, jira_page
+  def open_branches(jira_page)
+    branches = `git branch --list`.split("\n").map(&:chomp)
+    branches.each do |potential_issue_branch|
+      if potential_issue_branch =~ /([a-zA-Z0-9]+\-[0-9]+)/
+        potential_issue_name = $1
+        begin
+          page = @agent.get("#{@url}/rest/api/latest/search?jql=key=#{potential_issue_name}")
+        rescue
+          next
+        end
+        results = JSON.parse(page.body)
+        issue_json = results["issues"][0]
+        print_issue(issue_json, detailed = false) if issue_json
+      end
+    end
+  end
+
+  def do_action(jira_page)
+    require_issue(jira_page) if @@requires_issue.include? action
+    send action, jira_page
   end
 
   def go
+    login
+
     @agent = Mechanize.new do |agent|
       agent.follow_meta_refresh = true
       agent.add_auth(@authdomain, @username, @password)
@@ -174,65 +196,55 @@ class JiraHandler
 
     @agent.get("#{@url}/browse/#{@issue}") do |page|
       log(page.uri)
-      action(page)
+      do_action(page)
     end
   end
 
   def self.handle_commandline
-    options = {}
-    opt_object = nil
+    jira = self.new
     OptionParser.new do |opts|
       opts.banner = "Usage: ssojira <issue_id> [options]"
 
       opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
-        options[:verbose] = v
+        jira.verbose = true
       end
 
       opts.on("-s", "--start", "Create a branch and start working on this issue.") do |v|
-        options[:start] = true
+        jira.action = :start
       end
 
       opts.on("-l", "--list", "List issues assigned to me.") do |v|
-        options[:list] = true
+        jira.action = :list
+      end
+
+      opts.on("-o", "--open-branches", "List branches that are open locally and their issues.") do |v|
+        jira.action = :open_branches
       end
 
       opts.on("-a", "--authenticate", "Ask (again) for username and password.") do |v|
-        options[:login] = true
+        jira.login(force = true)
       end
 
       opts.on("-p", "--pull-request", "Open a PR for this issue") do |v|
-        options[:pr] = true
+        jira.action = :pull_request
       end
 
       opts.on("-c", "--comment", "Post a comment") do |v|
-        options[:comment] = true
+        jira.action = :comment
       end
 
       opts.on_tail("-h", "--help", "Show this message") do
         puts opts
         exit
       end
-
-      opt_object = opts
     end.parse!
 
-    issue = ARGV.shift
-
-    unless issue
-      `git rev-parse --abbrev-ref HEAD` =~ /(GR-\d+)/
-      issue = $1
-    end
-
-    if !issue && options.empty?
-      puts opt_object
-      exit
-    end
-
-    return issue, options
+    jira.issue = ARGV.shift || /(GR-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)[1]
+    jira
   end
 
   def self.go
-    new(*self.handle_commandline).go
+    self.handle_commandline.go
   end
 end
 
