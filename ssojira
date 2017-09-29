@@ -206,7 +206,7 @@ class JiraHandler
       opts.banner = "Usage: ssojira <issue_id> [options]"
 
       opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
-        jira.verbose = true
+        jira.verbose = v
       end
 
       opts.on("-s", "--start", "Create a branch and start working on this issue.") do |v|
