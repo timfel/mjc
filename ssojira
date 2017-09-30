@@ -239,7 +239,7 @@ class JiraHandler
       end
     end.parse!
 
-    jira.issue = ARGV.shift || /(GR-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)[1]
+    jira.issue = ARGV.shift || /(GR-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)&.[](1)
     jira
   end
 
