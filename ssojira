@@ -26,6 +26,7 @@ class JiraHandler
   DEFAULT_ACTION = :show
   DEFAULT_USERNAME = `git config user.email`.chomp
   ASSIGNED_TO_ME = "assignee=currentuser()"
+  STATUS_OPEN = "status%21%3D%22In+Progress%22+AND+status%3DOpen"
 
   attr_accessor :issue, :action, :verbose, :pull_request_id
   attr_reader :prompt, :cursor
@@ -74,11 +75,11 @@ class JiraHandler
   end
 
   def systemx(*args)
-    exit -1 unless system(args)
+    exit -1 unless system(*args)
   end
 
-  def list_issues(jql)
-    page = @agent.get("#{@url}/rest/api/latest/search?jql=#{jql}")
+  def list_issues(*jql)
+    page = @agent.get("#{@url}/rest/api/latest/search?jql=#{jql.join('+AND+')}")
     results = JSON.parse(page.body)
     results["issues"].map do |issue|
       format_issue(issue)
@@ -179,7 +180,11 @@ class JiraHandler
 
   def start(jira_page)
     unless @issue
-      @issue = /([A-Z]+-\d+)/.match(prompt.select("Start working on what?", list_issues(ASSIGNED_TO_ME), per_page:  15))[1]
+      issue_list = ["(cancel)"]
+      issue_list += list_issues(ASSIGNED_TO_ME, STATUS_OPEN)
+      selection = prompt.select("Start working on what?", issue_list, per_page:  15)
+      exit if selection == issue_list[0]
+      @issue = /([A-Z]+-\d+)/.match(selection)[1]
       return go
     end
     require_issue(jira_page)
