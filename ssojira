@@ -10,10 +10,37 @@ require "tty-cursor"
 require "mechanize"
 require "keyring"
 require "paint"
+require "vcr"
 
 begin
   require "pry"
 rescue LoadError
+end
+
+VCR.configure do |config|
+  config.cassette_library_dir = "request_cache"
+  config.hook_into :webmock
+  config.allow_http_connections_when_no_cassette = true
+  config.default_cassette_options = {
+    record: :new_episodes,
+    re_record_interval: 600,
+    allow_unused_http_interactions: true,
+  }
+end
+
+class Mechanize
+  alias_method :original_get, :get
+
+  def get(*args, **kwargs, &block)
+    result = VCR.use_cassette("jira_cache") do
+      original_get(*args, **kwargs)
+    end
+    if block
+      block.call(result)
+    else
+      result
+    end
+  end
 end
 
 

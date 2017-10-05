@@ -1,13 +1,18 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    addressable (2.5.2)
+      public_suffix (>= 2.0.2, < 4.0)
     coderay (1.1.2)
     corefoundation (0.2.0)
       ffi
+    crack (0.4.3)
+      safe_yaml (~> 1.0.0)
     domain_name (0.5.20170404)
       unf (>= 0.0.5, < 1.0.0)
     equatable (0.5.0)
     ffi (1.9.18)
+    hashdiff (0.3.6)
     hitimes (1.2.6)
     http-cookie (1.0.3)
       domain_name (~> 0.5)
@@ -41,9 +46,11 @@ GEM
     pry (0.11.0)
       coderay (~> 1.1.0)
       method_source (~> 0.8.1)
+    public_suffix (3.0.0)
     ruby-keychain (0.3.2)
       corefoundation (~> 0.2.0)
       ffi
+    safe_yaml (1.0.4)
     slop (3.6.0)
     timers (4.1.2)
       hitimes
@@ -60,6 +67,11 @@ GEM
     unf (0.1.4)
       unf_ext
     unf_ext (0.0.7.4)
+    vcr (3.0.3)
+    webmock (3.0.1)
+      addressable (>= 2.3.6)
+      crack (>= 0.3.2)
+      hashdiff
     webrobots (0.1.2)
     wisper (2.0.0)
 
@@ -73,6 +85,8 @@ DEPENDENCIES
   pry
   tty-cursor
   tty-prompt
+  vcr
+  webmock
 
 BUNDLED WITH
    1.15.4
