@@ -5,6 +5,8 @@ require "io/console"
 require "json"
 
 require "bundler/setup"
+require "tty-prompt"
+require "tty-cursor"
 require "mechanize"
 require "keyring"
 require "paint"
@@ -22,15 +24,20 @@ class JiraHandler
   URL_KEYRING_SERVICE = "ssojira-url"
   AUTH_DOMAIN_SERVICE = "ssojira-authdomain"
   DEFAULT_ACTION = :show
+  DEFAULT_USERNAME = `git config user.email`.chomp
+  ASSIGNED_TO_ME = "assignee=currentuser()"
 
-  attr_accessor :issue, :action, :verbose
+  attr_accessor :issue, :action, :verbose, :pull_request_id
+  attr_reader :prompt, :cursor
 
   def initialize
     @verbose = false
+    @prompt = TTY::Prompt.new
+    @cursor = TTY::Cursor
     @action = DEFAULT_ACTION
   end
 
-  @@requires_issue = [:start, :show, :pull_request, :comment]
+  @@requires_issue = [:show, :pull_request, :comment]
 
   def action=(symbol)
     if action == DEFAULT_ACTION
@@ -45,11 +52,10 @@ class JiraHandler
     exit -1
   end
 
-  def get_secret(service, user, prompt, force, secret=true)
+  def get_secret(service, user, txt, force, secret: true, default: "")
     result = @keyring.get_password(service, user)
     if !result || force
-      print prompt
-      result = (secret ? STDIN.noecho(&:gets) : STDIN.gets).chomp
+      result = (secret ? prompt.mask(txt) : prompt.ask(txt, default: default))
       @keyring.set_password(service, user, result)
     end
     result
@@ -57,57 +63,72 @@ class JiraHandler
 
   def login(force = false)
     @keyring ||= Keyring.new
-    @url ||= get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", force, secret=false)
-    @authdomain ||= get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", force, secret=false)
-    @username ||= get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", force, secret=false)
-    @password ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", force, secret=true)
+    @url ||= get_secret(URL_KEYRING_SERVICE, APP_KEYRING_USER, "JIRA Url: ", force, secret: false)
+    @authdomain ||= get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", force, secret: false)
+    @username ||= get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", force, secret: false, default: DEFAULT_USERNAME)
+    @password ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", force, secret: true)
   end
 
   def log(*args)
     puts args if verbose
   end
 
-  def list(jira_page)
-    page = @agent.get("#{@url}/rest/api/latest/search?jql=assignee=currentuser()")
+  def systemx(*args)
+    exit -1 unless system(args)
+  end
+
+  def list_issues(jql)
+    page = @agent.get("#{@url}/rest/api/latest/search?jql=#{jql}")
     results = JSON.parse(page.body)
-    results["issues"].each do |issue|
-      print_issue(issue)
+    results["issues"].map do |issue|
+      format_issue(issue)
     end
+  end
+
+  def list(jira_page)
+    list_issues(ASSIGNED_TO_ME).each { |i| puts i }
   end
 
   def pull_request(jira_page)
     origin_url = `git remote get-url origin`.chomp
-    branches = `git branch --list`
-    branches =~ /\s([^ ]+#{@issue}[^ ]+)/
-    branch = $1
-    if branch.nil?
-      error "Could not find branch for issue #{@issue}"
-    end
     # switch to http(s)
     origin_url.sub!(/^ssh:\/\/([a-zA-Z0-9_]+@)?/, "https://")
     # remove ssh port
     origin_url.sub!(/:[0-9]+/, "")
     # transform repo path
     origin_url.sub!(/\/(?<project>\w+)\/(?<repo>[a-zA-Z0-9\-_]+)(\.git)?$/, '/projects/\k<project>/repos/\k<repo>')
-    prurl = "#{origin_url}/compare/commits?sourceBranch=refs/heads/#{branch}"
-    command_success = false
-    if RUBY_PLATFORM =~ /linux/
-      command_success = system("xdg-open #{prurl}")
-    elsif RUBY_PLATFORM =~ /windows/
-      command_success = system("start #{prurl}")
-    elsif RUBY_PLATFORM =~ /darwin/
-      command_success = system("open #{prurl}")
+    unless pull_request_id
+      branches = `git branch --list`
+      branches =~ /\s([^ ]+#{@issue}[^ ]+)/
+      branch = $1
+      if branch.nil?
+        error "Could not find branch for issue #{@issue}"
+      end
+      prurl = "#{origin_url}/compare/commits?sourceBranch=refs/heads/#{branch}"
+      command_success = false
+      if RUBY_PLATFORM =~ /linux/
+        command_success = system("xdg-open #{prurl}")
+      elsif RUBY_PLATFORM =~ /windows/
+        command_success = system("start #{prurl}")
+      elsif RUBY_PLATFORM =~ /darwin/
+        command_success = system("open #{prurl}")
+      end
+      puts "Open a PR at: #{prurl}" unless command_success
+      id = prompt.ask "Enter pull-request ID (or nothing to cancel posting PR as a comment):"
+      return if id.empty?
+    else
+      id = pull_request_id
     end
-    puts "Open a PR at: #{prurl}" unless command_success
-    print "Enter pull-request ID (or nothing to cancel posting PR as a comment): "
-    id = STDIN.gets.chomp
-    return if id.empty?
-    post_comment(jira_page, "Pull request: #{origin_url}/pull-requests/#{id}/overview")
+    prviewurl = "#{origin_url}/pull-requests/#{pull_request_id}/overview"
+    if pull_request_id
+      show(jira_page, detailed = false)
+      return unless prompt.yes? "Post #{prviewurl} to #{@issue}?"
+    end
+    post_comment(jira_page, "Pull request: #{prviewurl}")
   end
 
   def comment(jira_page)
-    print "Enter one-line comment (or nothing to cancel): "
-    comment = STDIN.gets.chomp
+    comment = prompt.multiline("Enter comment (or nothing to cancel):").join
     return if comment.empty?
     post_comment(jira_page, comment)
   end
@@ -119,7 +140,12 @@ class JiraHandler
     comment_form.submit
   end
 
-  def print_issue(issue, detailed = false)
+  def print_issue(issue, detailed: false)
+    puts format_issue(issue, detailed: detailed)
+  end
+
+  def format_issue(issue, detailed: false)
+    out = []
     i = issue["fields"]
     key = issue["key"]
     begin
@@ -128,21 +154,22 @@ class JiraHandler
       key = Paint[key, :white]
     end
     components = Paint["(#{i["components"].map { |c| c["name"] }.join(", ")})", "666"]
-    puts "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
+    out << "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
 
     if detailed
-      puts "#{@url}/browse/#{@issue}"
+      out << "#{@url}/browse/#{@issue}"
 
       if i['description']
-        puts Paint["#{i['description']}\n", :white]
+        out << Paint["#{i['description']}\n", :white]
       end
 
       (i["comment"]&.[]("comments") || []).each do |comment|
         author = Paint["#{comment['author']['displayName']}", :white]
         body = Paint[comment['body']]
-        puts "#{author}: #{body}\n\n"
+        out << "#{author}: #{body}\n\n"
       end
     end
+    out.join
   end
 
   def require_issue(jira_page)
@@ -151,21 +178,31 @@ class JiraHandler
   end
 
   def start(jira_page)
-    system "git checkout -b topic/#{@issue}"
+    unless @issue
+      @issue = /([A-Z]+-\d+)/.match(prompt.select("Start working on what?", list_issues(ASSIGNED_TO_ME), per_page:  15))[1]
+      return go
+    end
+    require_issue(jira_page)
+    systemx "git checkout master && git pull"
+    systemx "git checkout -b topic/#{@issue}"
     log("Starting progress")
     jira_page.link_with(:text => "Start Progress")&.click
     log("Assigning to me")
     jira_page.link_with(:text => "Assign to me")&.click
   end
 
-  def show(jira_page)
+  def show(jira_page, detailed: true)
     page = @agent.get("#{@url}/rest/api/latest/search?jql=key=#{@issue}&fields=*all")
     results = JSON.parse(page.body)
-    print_issue(results["issues"][0], detailed = true)
+    print_issue(results["issues"][0], detailed: detailed)
   end
 
   def open_branches(jira_page)
     branches = `git branch --list`.split("\n").map(&:chomp)
+    worked_issues = {"(leave menu)" => nil}
+    branch_prompt = "Switch to branch?"
+    puts branch_prompt
+    print "  ", worked_issues.keys.first, "\n"
     branches.each do |potential_issue_branch|
       if potential_issue_branch =~ /([a-zA-Z0-9]+\-[0-9]+)/
         potential_issue_name = $1
@@ -176,8 +213,18 @@ class JiraHandler
         end
         results = JSON.parse(page.body)
         issue_json = results["issues"][0]
-        print_issue(issue_json, detailed = false) if issue_json
+        if issue_json
+          issuestr = format_issue(issue_json, detailed: false)
+          worked_issues[issuestr] = potential_issue_branch
+          print "  ", issuestr, "\n"
+        end
       end
+    end
+    print cursor.up(worked_issues.size + 2)
+    print cursor.clear_screen_down
+    selected_issue = prompt.select(branch_prompt, worked_issues, per_page: 15)
+    if selected_issue
+      systemx "git checkout #{selected_issue}"
     end
   end
 
@@ -209,7 +256,7 @@ class JiraHandler
         jira.verbose = v
       end
 
-      opts.on("-s", "--start", "Create a branch and start working on this issue.") do |v|
+      opts.on("-s", "--start", "Create a branch and start working on an issue (interactive if no issue given).") do |v|
         jira.action = :start
       end
 
@@ -217,7 +264,7 @@ class JiraHandler
         jira.action = :list
       end
 
-      opts.on("-o", "--open-branches", "List branches that are open locally and their issues.") do |v|
+      opts.on("-o", "--open-branches", "List branches that are open locally and their issues and optionally switch to one.") do |v|
         jira.action = :open_branches
       end
 
@@ -225,8 +272,9 @@ class JiraHandler
         jira.login(force = true)
       end
 
-      opts.on("-p", "--pull-request", "Open a PR for this issue") do |v|
+      opts.on("-p", "--pull-request [ID]", "Open a PR for this issue, or post a PR url as comment on the issue") do |id, issue|
         jira.action = :pull_request
+        jira.pull_request_id = id
       end
 
       opts.on("-c", "--comment", "Post a comment") do |v|
@@ -239,7 +287,11 @@ class JiraHandler
       end
     end.parse!
 
-    jira.issue = ARGV.shift || /(GR-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)&.[](1)
+    jira.issue = ARGV.shift
+    unless jira.action == :start
+      # for start without an issue, we ask
+      jira.issue ||= /([A-Z]+-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)&.[](1)
+    end
     jira
   end
 
