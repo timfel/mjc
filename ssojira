@@ -32,13 +32,8 @@ class Mechanize
   alias_method :original_get, :get
 
   def get(*args, **kwargs, &block)
-    result = VCR.use_cassette("jira_cache") do
-      original_get(*args, **kwargs)
-    end
-    if block
-      block.call(result)
-    else
-      result
+    VCR.use_cassette("jira_cache") do
+      original_get(*args, **kwargs, &block)
     end
   end
 end
