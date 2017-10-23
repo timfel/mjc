@@ -17,23 +17,34 @@ begin
 rescue LoadError
 end
 
+CACHE_TIME = 3600
+CACHE_DIR = "request_cache"
+CACHE_FILE = "jira_cache"
+
 VCR.configure do |config|
-  config.cassette_library_dir = "request_cache"
+  config.cassette_library_dir = CACHE_DIR
   config.hook_into :webmock
   config.allow_http_connections_when_no_cassette = true
   config.default_cassette_options = {
     record: :new_episodes,
-    re_record_interval: 600,
+    re_record_interval: CACHE_TIME,
     allow_unused_http_interactions: true,
+    match_requests_on: [:uri, :method],
   }
 end
+
 
 class Mechanize
   alias_method :original_get, :get
 
   def get(*args, **kwargs, &block)
-    VCR.use_cassette("jira_cache") do
-      original_get(*args, **kwargs, &block)
+    result = VCR.use_cassette(CACHE_FILE) do
+      original_get(*args, **kwargs)
+    end
+    if block
+      block.call(result)
+    else
+      result
     end
   end
 end
@@ -138,11 +149,11 @@ class JiraHandler
       end
       puts "Open a PR at: #{prurl}" unless command_success
       id = prompt.ask "Enter pull-request ID (or nothing to cancel posting PR as a comment):"
-      return if id.empty?
+      return unless id
     else
       id = pull_request_id
     end
-    prviewurl = "#{origin_url}/pull-requests/#{pull_request_id}/overview"
+    prviewurl = "#{origin_url}/pull-requests/#{id}/overview"
     if pull_request_id
       show(jira_page, detailed = false)
       return unless prompt.yes? "Post #{prviewurl} to #{@issue}?"
@@ -192,7 +203,7 @@ class JiraHandler
         out << "#{author}: #{body}\n\n"
       end
     end
-    out.join
+    out.join("\n")
   end
 
   def require_issue(jira_page)
@@ -241,8 +252,8 @@ class JiraHandler
         results = JSON.parse(page.body)
         issue_json = results["issues"][0]
         if issue_json
-          issuestr = format_issue(issue_json, detailed: false)
-          worked_issues[issuestr] = potential_issue_branch
+          issuestr = "#{potential_issue_branch} - #{format_issue(issue_json, detailed: false)}"
+          worked_issues[issuestr] = potential_issue_branch.chomp.sub(/^\*\s+/, "")
           print "  ", issuestr, "\n"
         end
       end
@@ -308,11 +319,17 @@ class JiraHandler
         jira.action = :comment
       end
 
+      opts.on("-f", "--refresh", "Don't use cache, force pulling fresh data.") do |v|
+        self.clear_http_cache(Time.now)
+      end
+
       opts.on_tail("-h", "--help", "Show this message") do
         puts opts
         exit
       end
     end.parse!
+
+    clear_http_cache(Time.now - CACHE_TIME)
 
     jira.issue = ARGV.shift
     unless jira.action == :start
@@ -320,6 +337,11 @@ class JiraHandler
       jira.issue ||= /([A-Z]+-\d+)/.match(`git rev-parse --abbrev-ref HEAD`)&.[](1)
     end
     jira
+  end
+
+  def self.clear_http_cache(offset)
+    cachefile = "#{CACHE_DIR}/#{CACHE_FILE}.yml"
+    File.unlink(cachefile) if File.exist?(cachefile) && File.ctime(cachefile) < offset
   end
 
   def self.go
