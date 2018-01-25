@@ -51,6 +51,8 @@ end
 
 
 class JiraHandler
+  PROJECT_KEYRING_SERVICE = "ssojira-project"
+  COMPONENTS_KEYRING_SERVICE = "ssojira-components"
   USERNAME_KEYRING_SERVICE = "ssojira-user"
   APP_KEYRING_USER = "ssojira-cli"
   PASSWORD_KEYRING_SERVICE = "ssojira-password"
@@ -101,6 +103,8 @@ class JiraHandler
     @authdomain ||= get_secret(AUTH_DOMAIN_SERVICE, @url, "Auth-Domain: ", force, secret: false)
     @username ||= get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", force, secret: false, default: DEFAULT_USERNAME)
     @password ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", force, secret: true)
+    @project ||= get_secret(PROJECT_KEYRING_SERVICE, @url, "JIRA default project: ", force, secret: false)
+    @components ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "JIRA default components (comma-separated): ", force, secret: false)
   end
 
   def log(*args)
@@ -172,6 +176,36 @@ class JiraHandler
     comment_text = comment_form.field_with(name: "comment")
     comment_text.value = comment
     comment_form.submit
+  end
+
+  def new_issue(jira_page)
+    title = prompt.ask("Enter issue title (or nothing to cancel):")
+    return unless title && !title.empty?
+    body = prompt.multiline("Enter issue body").join
+    project = prompt.ask("Enter project:", default: @project)
+    components = prompt.ask("Enter components (comma-separated):", default: @components)
+    type = prompt.ask("Enter issue type (Bug, Improvement, Task, ...)", default: "Task")
+
+    data = {
+      "fields" => {
+        "project" => {"key" => project},
+        "components" => components.split(",").map { |c| {"name" => c} },
+        "summary" => title,
+        "description" => body,
+        "issuetype" => {
+          "name" => type,
+        },
+      }
+    }
+
+    page = @agent.post(
+      "#{@url}/rest/api/latest/issue",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+
+    results = JSON.parse(page.body)
+    puts(results)
   end
 
   def print_issue(issue, detailed: false)
@@ -317,6 +351,10 @@ class JiraHandler
 
       opts.on("-c", "--comment", "Post a comment") do |v|
         jira.action = :comment
+      end
+
+      opts.on("-n", "--new", "Create a new issue") do |v|
+        jira.action = :new_issue
       end
 
       opts.on("-f", "--refresh", "Don't use cache, force pulling fresh data.") do |v|
