@@ -34,17 +34,19 @@ VCR.configure do |config|
 end
 
 
-class Mechanize
-  alias_method :original_get, :get
+def patch_mechanize
+  Mechanize.class_eval do
+    alias_method :original_get, :get
 
-  def get(*args, **kwargs, &block)
-    result = VCR.use_cassette(CACHE_FILE) do
-      original_get(*args, **kwargs)
-    end
-    if block
-      block.call(result)
-    else
-      result
+    define_method :get do |*args, **kwargs, &block|
+      result = VCR.use_cassette(CACHE_FILE) do
+        original_get(*args, **kwargs)
+      end
+      if block
+        block.call(result)
+      else
+        result
+      end
     end
   end
 end
@@ -321,6 +323,7 @@ class JiraHandler
 
   def self.handle_commandline
     jira = self.new
+    should_patch = true
     OptionParser.new do |opts|
       opts.banner = "Usage: ssojira <issue_id> [options]"
 
@@ -359,6 +362,7 @@ class JiraHandler
 
       opts.on("-f", "--refresh", "Don't use cache, force pulling fresh data.") do |v|
         self.clear_http_cache(Time.now)
+        should_patch = false
       end
 
       opts.on_tail("-h", "--help", "Show this message") do
@@ -367,6 +371,7 @@ class JiraHandler
       end
     end.parse!
 
+    patch_mechanize if should_patch
     clear_http_cache(Time.now - CACHE_TIME)
 
     jira.issue = ARGV.shift
