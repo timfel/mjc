@@ -129,6 +129,45 @@ class JiraHandler
     list_issues(ASSIGNED_TO_ME).each { |i| puts i }
   end
 
+  def resolve(jira_page)
+    issue_list = ["(cancel)"]
+    issue_list += list_issues(ASSIGNED_TO_ME)
+    selection = prompt.select("Resolve what?", issue_list, per_page: 15)
+    exit if selection == issue_list[0]
+    @issue = /([A-Z]+-\d+)/.match(selection)[1]
+
+    # try to find transitions by common names
+    page = @agent.get("#{@url}/rest/api/latest/issue/#{@issue}/transitions")
+    transitions = JSON.parse(page.body)["transitions"]
+    tid = transitions.find { |t| t["name"].downcase =~ "Resolve Issue" }
+    tid ||= transitions.find { |t| t["name"].downcase =~ "resolve" }
+    tid ||= transitions.find { |t| t["name"].downcase =~ "close issue" }
+    tid ||= transitions.find { |t| t["name"].downcase =~ "close" }
+    if tid.nil?
+      error "Could not find a transition for resolving an issue"
+    end
+
+    data = {
+      "fields" => {
+        "resolution" => {
+          "name" => "Fixed"
+        }
+      },
+      "transition" => {
+        "id" => tid["id"]
+      }
+    }
+
+    page = @agent.post(
+      "#{@url}/rest/api/latest/issue/#{@issue}/transitions",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+
+    results = JSON.parse(page.body)
+    puts(results)
+  end
+
   def pull_request(jira_page)
     origin_url = `git remote get-url origin`.chomp
     # switch to http(s)
@@ -346,6 +385,10 @@ class JiraHandler
 
       opts.on("-a", "--authenticate", "Ask (again) for username and password.") do |v|
         jira.login(force = true)
+      end
+
+      opts.on("-r", "--resolve", "Resolve an open issue assigned to me") do |v|
+        jira.action = :resolve
       end
 
       opts.on("-p", "--pull-request [ID]", "Open a PR for this issue, or post a PR url as comment on the issue") do |id, issue|
