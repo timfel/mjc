@@ -313,6 +313,7 @@ class JiraHandler
     @agent = Mechanize.new do |agent|
       agent.follow_meta_refresh = true
       agent.add_auth(@authdomain, @username, @password)
+      agent.log = Logger.new(STDOUT) if verbose
     end
 
     @agent.get("#{@url}/browse/#{@issue}") do |page|
