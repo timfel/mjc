@@ -106,7 +106,7 @@ class JiraHandler
     @username ||= get_secret(USERNAME_KEYRING_SERVICE, @url, "Username: ", force, secret: false, default: DEFAULT_USERNAME)
     @password ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "Password: ", force, secret: true)
     @project ||= get_secret(PROJECT_KEYRING_SERVICE, @url, "JIRA default project: ", force, secret: false)
-    @components ||= get_secret(PASSWORD_KEYRING_SERVICE, @username, "JIRA default components (comma-separated): ", force, secret: false)
+    @components ||= get_secret(COMPONENTS_KEYRING_SERVICE, @username, "JIRA default components (comma-separated): ", force, secret: false)
   end
 
   def log(*args)
