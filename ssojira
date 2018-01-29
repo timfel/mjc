@@ -63,7 +63,7 @@ class JiraHandler
   DEFAULT_ACTION = :show
   DEFAULT_USERNAME = `git config user.email`.chomp
   ASSIGNED_TO_ME = "assignee=currentuser()"
-  STATUS_OPEN = "status%21%3D%22In+Progress%22+AND+status%3DOpen"
+  STATUS_OPEN = "%20status%20in%20(Open%2C%20%22In%20Progress%22%2C%20Reopened)%20"
 
   attr_accessor :issue, :action, :verbose, :pull_request_id
   attr_reader :prompt, :cursor
@@ -126,7 +126,7 @@ class JiraHandler
   end
 
   def list(jira_page)
-    list_issues(ASSIGNED_TO_ME).each { |i| puts i }
+    list_issues(ASSIGNED_TO_ME, STATUS_OPEN).each { |i| puts i }
   end
 
   def resolve(jira_page)
@@ -263,11 +263,10 @@ class JiraHandler
       key = Paint[key, :white]
     end
     components = Paint["(#{i["components"].map { |c| c["name"] }.join(", ")})", "666"]
-    out << "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components}"
+    url = Paint["#{@url}/browse/#{issue['key']}", "gray"]
+    out << "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components} #{url}"
 
     if detailed
-      out << "#{@url}/browse/#{@issue}"
-
       if i['description']
         out << Paint["#{i['description']}\n", :white]
       end
