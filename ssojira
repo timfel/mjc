@@ -129,23 +129,31 @@ class JiraHandler
     list_issues(ASSIGNED_TO_ME, STATUS_OPEN).each { |i| puts i }
   end
 
+  def find_transition(*names)
+    # try to find transitions by common names
+    page = @agent.get("#{@url}/rest/api/latest/issue/#{@issue}/transitions")
+    transitions = JSON.parse(page.body)["transitions"]
+    names.each do |name|
+      tid = transitions.find { |t| t["name"].downcase =~ name.downcase }
+      return tid if tid
+    end
+    error "Could not find a transition for resolving an issue"
+  end
+
+  def find_resolve_transition
+    find_transition("resolve issue", "resolve", "close issue", "close")
+  end
+
+  def find_start_transition
+    find_transition("start progress", "start")
+  end
+
   def resolve(jira_page)
     issue_list = ["(cancel)"]
     issue_list += list_issues(ASSIGNED_TO_ME)
     selection = prompt.select("Resolve what?", issue_list, per_page: 15)
     exit if selection == issue_list[0]
     @issue = /([A-Z]+-\d+)/.match(selection)[1]
-
-    # try to find transitions by common names
-    page = @agent.get("#{@url}/rest/api/latest/issue/#{@issue}/transitions")
-    transitions = JSON.parse(page.body)["transitions"]
-    tid = transitions.find { |t| t["name"].downcase =~ "Resolve Issue" }
-    tid ||= transitions.find { |t| t["name"].downcase =~ "resolve" }
-    tid ||= transitions.find { |t| t["name"].downcase =~ "close issue" }
-    tid ||= transitions.find { |t| t["name"].downcase =~ "close" }
-    if tid.nil?
-      error "Could not find a transition for resolving an issue"
-    end
 
     data = {
       "fields" => {
@@ -154,7 +162,7 @@ class JiraHandler
         }
       },
       "transition" => {
-        "id" => tid["id"]
+        "id" => find_resolve_transition["id"]
       }
     }
 
