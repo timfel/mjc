@@ -34,6 +34,21 @@ VCR.configure do |config|
 end
 
 
+class Integer
+  def day
+    self * (60 * 60 * 24)
+  end
+
+  def week
+    day * 7
+  end
+
+  def ago
+    Time.now - self
+  end
+end
+
+
 def patch_mechanize
   Mechanize.class_eval do
     alias_method :original_get, :get
@@ -65,7 +80,7 @@ class JiraHandler
   ASSIGNED_TO_ME = "assignee=currentuser()"
   STATUS_OPEN = "%20status%20in%20(Open%2C%20%22In%20Progress%22%2C%20Reopened)%20"
 
-  attr_accessor :issue, :action, :verbose, :pull_request_id
+  attr_accessor :issue, :action, :verbose, :pull_request_id, :tag
   attr_reader :prompt, :cursor
 
   def initialize
@@ -293,7 +308,7 @@ class JiraHandler
     error "No such issue #{@issue}" unless jira_page.uri.to_s.end_with?(@issue)
   end
 
-  def start(jira_page)
+  def just_start(jira_page)
     unless @issue
       issue_list = ["(cancel)"]
       issue_list += list_issues(ASSIGNED_TO_ME, STATUS_OPEN)
@@ -303,12 +318,18 @@ class JiraHandler
       return go
     end
     require_issue(jira_page)
-    systemx "git checkout master && git pull"
-    systemx "git checkout -b topic/#{@issue}"
+    yield if block_given?
     log("Starting progress")
     jira_page.link_with(:text => "Start Progress")&.click
     log("Assigning to me")
     jira_page.link_with(:text => "Assign to me")&.click
+  end
+
+  def start(jira_page)
+    just_start do
+      systemx "git checkout master && git pull"
+      systemx "git checkout -b topic/#{@issue}"
+    end
   end
 
   def show(jira_page, detailed: true)
@@ -348,6 +369,34 @@ class JiraHandler
     end
   end
 
+  def changelog(jira_page)
+    things = []
+    unless selected_tag = self.tag
+      tags = `git tag --list`.split("\n").map(&:chomp)
+      tags.unshift("Enter manually")
+      selected_tag = prompt.select("Closed issues since when?", tags, per_page: 15)
+    end
+    if selected_tag
+      if selected_tag == "Enter manually"
+        ts = eval(prompt.ask("Since when (Ruby code)?", default: "1.week.ago"))
+        puts "Needs a Time object" unless ts.is_a?(Time)
+      else
+        things = `git log --merges --pretty=format:%s #{selected_tag}..origin/master | grep -Pv '^Merge'`.split("\n").map(&:strip)
+        ts = Time.at(`git log -1 --pretty=%at #{selected_tag}`.chomp.to_i)
+      end
+      tsjql = ts.strftime("%Y/%m/%d %H:%M")
+      page = @agent.get("#{@url}/rest/api/latest/search?jql=updated>='#{tsjql}'%20AND%20resolution%20is%20not%20EMPTY%20AND%20component=#{@components}")
+      results = JSON.parse(page.body)
+      issues = results["issues"]
+      if issues
+        issues.each do |issue|
+          things << "[#{issue["key"]}] #{issue["fields"]["summary"]}"
+        end
+      end
+    end
+    puts things.sort.join("\n")
+  end
+
   def do_action(jira_page)
     require_issue(jira_page) if @@requires_issue.include? action
     send action, jira_page
@@ -382,6 +431,10 @@ class JiraHandler
         jira.action = :start
       end
 
+      opts.on("--just-start", "Start progress on an issue (interactive if no issue given).") do |v|
+        jira.action = :just_start
+      end
+
       opts.on("-l", "--list", "List issues assigned to me.") do |v|
         jira.action = :list
       end
@@ -409,6 +462,13 @@ class JiraHandler
 
       opts.on("-n", "--new", "Create a new issue") do |v|
         jira.action = :new_issue
+      end
+
+      opts.on("--changelog [TAG]", "Show changelog since a selected tag") do |v|
+        self.clear_http_cache(Time.now)
+        should_patch = false
+        jira.action = :changelog
+        jira.tag = v
       end
 
       opts.on("-f", "--refresh", "Don't use cache, force pulling fresh data.") do |v|
