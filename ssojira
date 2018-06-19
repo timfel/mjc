@@ -326,7 +326,7 @@ class JiraHandler
   end
 
   def start(jira_page)
-    just_start do
+    just_start(jira_page) do
       systemx "git checkout master && git pull"
       systemx "git checkout -b topic/#{@issue}"
     end
