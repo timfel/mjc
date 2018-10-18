@@ -7,5 +7,6 @@ gem 'tty-prompt'
 gem 'tty-cursor'
 gem 'vcr'
 gem 'webmock'
+gem 'github_api'
 
 gem 'pry', group: :development

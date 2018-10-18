@@ -11,6 +11,7 @@ require "mechanize"
 require "keyring"
 require "paint"
 require "vcr"
+require "github_api"
 
 begin
   require "pry"
@@ -80,7 +81,7 @@ class JiraHandler
   ASSIGNED_TO_ME = "assignee=currentuser()"
   STATUS_OPEN = "%20status%20in%20(Open%2C%20%22In%20Progress%22%2C%20Reopened)%20"
 
-  attr_accessor :issue, :action, :verbose, :pull_request_id, :tag
+  attr_accessor :issue, :action, :verbose, :pull_request_id, :tag, :github_url
   attr_reader :prompt, :cursor
 
   def initialize
@@ -196,6 +197,26 @@ class JiraHandler
     puts(results)
   end
 
+  def github(jira_page)
+    if /(?<ghuser>[^\/]+)\/(?<ghrepo>[^\/]+)\/pull\/(?<prid>\d+)/ =~ @github_url
+      pr = Github::Client::PullRequests.new.get user: ghuser, repo: ghrepo, number: prid.to_i
+      pr.title
+      internal_issue = new_issue(jira_page, title: "Github issue #{prid}: #{pr.title}", body: <<-EOF)
+      From #{pr.user.login}:
+      {quote}
+      #{pr.to_h['body']}
+      {quote}
+      EOF
+
+      pull_branch = pr.head.ref
+      pull_html_url = pr.head.repo.clone_url
+      @issue = internal_issue["key"]
+      start(@agent.get("#{@url}/browse/#{@issue}"))
+      system "git fetch #{pull_html_url} #{pull_branch}"
+      system "git merge FETCH_HEAD"
+    end
+  end
+
   def pull_request(jira_page)
     origin_url = `git remote get-url origin`.chomp
     # switch to http(s)
@@ -247,10 +268,14 @@ class JiraHandler
     comment_form.submit
   end
 
-  def new_issue(jira_page)
-    title = prompt.ask("Enter issue title (or nothing to cancel):")
-    return unless title && !title.empty?
-    body = prompt.multiline("Enter issue body").join
+  def new_issue(jira_page, title: nil, body: nil)
+    unless title
+      title = prompt.ask("Enter issue title (or nothing to cancel):")
+      return unless title && !title.empty?
+    end
+    unless body
+      body = prompt.multiline("Enter issue body").join
+    end
     project = prompt.ask("Enter project:", default: @project)
     components = prompt.ask("Enter components (comma-separated):", default: @components)
     type = prompt.ask("Enter issue type (Bug, Improvement, Task, ...)", default: "Task")
@@ -275,6 +300,7 @@ class JiraHandler
 
     results = JSON.parse(page.body)
     puts(results)
+    results
   end
 
   def print_issue(issue, detailed: false)
@@ -459,6 +485,11 @@ class JiraHandler
       opts.on("-p", "--pull-request [ID]", "Open a PR for this issue, or post a PR url as comment on the issue") do |id, issue|
         jira.action = :pull_request
         jira.pull_request_id = id
+      end
+
+      opts.on("-g", "--github [URL]", "Import PR from github, create Jira issue and PR") do |url, v|
+        jira.action = :github
+        jira.github_url = url
       end
 
       opts.on("-c", "--comment", "Post a comment") do |v|
