@@ -7,6 +7,8 @@ CONFIG = File.expand_path(File.join("..", ".secrets.yml"), __FILE__)
 KEYFILE = File.expand_path(File.join("..", ".keyfile"), __FILE__)
 
 class Keyring
+  attr_reader :secrets
+
   def initialize
     unless File.exist? KEYFILE
       passphrase = TTY::Prompt.new.mask "We need to generate a key file, please enter a passphrase: "
@@ -27,5 +29,18 @@ class Keyring
   def set_password(service, user, password)
     (@secrets[service] ||= {})[user] = Base64.encode64(@key.private_encrypt(password))
     File.open(CONFIG, "w") { |f| f << YAML.dump(@secrets) }
+  end
+end
+
+if __FILE__ == $0
+  k = Keyring.new
+  if ARGV[0]
+    if ARGV[1]
+      puts k.get_password(*ARGV)
+    else
+      puts k.secrets[ARGV[0]].keys
+    end
+  else
+    puts k.secrets.keys
   end
 end
