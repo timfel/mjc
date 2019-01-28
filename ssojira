@@ -214,6 +214,17 @@ class JiraHandler
       start(@agent.get("#{@url}/browse/#{@issue}"))
       system "git fetch #{pull_html_url} #{pull_branch}"
       system "git merge FETCH_HEAD"
+    elsif /(?<ghuser>[^\/]+)\/(?<ghrepo>[^\/]+)\/issues\/(?<prid>\d+)/ =~ @github_url
+      pr = Github::Client::Issues.new.get user: ghuser, repo: ghrepo, number: prid.to_i
+      pr.title
+      internal_issue = new_issue(jira_page, title: "Github issue #{prid}: #{pr.title}", body: <<-EOF)
+      From #{pr.user.login}:
+      {quote}
+      #{pr.to_h['body']}
+      {quote}
+
+      #{@github_url}
+      EOF
     end
   end
 
@@ -487,7 +498,7 @@ class JiraHandler
         jira.pull_request_id = id
       end
 
-      opts.on("-g", "--github [URL]", "Import PR from github, create Jira issue and PR") do |url, v|
+      opts.on("-g", "--github [URL]", "Import PR/issue from github, create Jira issue and PR") do |url, v|
         jira.action = :github
         jira.github_url = url
       end
