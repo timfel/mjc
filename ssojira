@@ -150,6 +150,43 @@ class JiraHandler
     list_issues(ASSIGNED_TO_ME, STATUS_OPEN).each { |i| puts i }
   end
 
+  def list_last_week(jira_page)
+    users = [
+      '"Tim Felgentreff"',
+      '"Cosmin Basca"',
+      '"Florian Angerer"',
+      '"Petr Pisl"'
+    ].shuffle!
+
+    puts "Please select the window to type in"
+    window_name = `xdotool selectwindow getwindowname`.chomp
+
+    users.each do |user|
+      page = @agent.get("#{@url}/rest/api/latest/search?jql=updated >%3D -1w AND assignee in (#{user}) AND component = Python ORDER BY status DESC")
+      results = JSON.parse(page.body)
+
+      system "xdotool search --name '#{window_name}' key Return Return"
+      system "xdotool search --name '#{window_name}' type '@#{user[1...-1]}'"
+      sleep 0.8
+      system "xdotool search --name '#{window_name}' key Return" # accept user link
+      sleep 0.8
+
+      system "xdotool search --name '#{window_name}' key Return"
+      system "xdotool search --name '#{window_name}' key minus space" # list
+      sleep 0.8
+
+      results["issues"].map do |issue|
+        string = "#{@url}/browse/#{issue['key']}"
+        system "printf '#{string}' | xclip -i -selection clipboard"
+        sleep 0.1 # give time for async JS to run
+        system "xdotool search --name '#{window_name}' key --clearmodifiers 'ctrl+v'"
+        sleep 1 # give time for async JS to run
+        system "xdotool search --name '#{window_name}' key Return"
+      end
+    end
+    system "xdotool search --name '#{window_name}' windowactivate"
+  end
+
   def find_transition(*names)
     # try to find transitions by common names
     page = @agent.get("#{@url}/rest/api/latest/issue/#{@issue}/transitions")
@@ -479,6 +516,10 @@ class JiraHandler
 
       opts.on("-l", "--list", "List issues assigned to me.") do |v|
         jira.action = :list
+      end
+
+      opts.on("--list-last-week", "List issues touched by us in the last week") do |v|
+        jira.action = :list_last_week
       end
 
       opts.on("-o", "--open-branches", "List branches that are open locally and their issues and optionally switch to one.") do |v|
