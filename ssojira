@@ -326,7 +326,8 @@ class JiraHandler
     end
     project = prompt.ask("Enter project:", default: @project)
     components = prompt.ask("Enter components (comma-separated):", default: @components)
-    type = prompt.ask("Enter issue type (Bug, Improvement, Task, ...)", default: "Task")
+    type = prompt.ask("Enter issue type (Bug, Improvement, Task, New Feature, ...)", default: "Bug")
+    # labels = prompt.ask("Enter issue labels (comma-separated, e.g. peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation): ", default: "")
 
     data = {
       "fields" => {
