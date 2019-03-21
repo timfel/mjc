@@ -192,7 +192,7 @@ class JiraHandler
     page = @agent.get("#{@url}/rest/api/2/issue/#{@issue}/transitions")
     transitions = JSON.parse(page.body)["transitions"]
     names.each do |name|
-      tid = transitions.find { |t| t["name"].downcase =~ name.downcase }
+      tid = transitions.find { |t| t["name"].downcase =~ /#{name.downcase}/ }
       return tid if tid
     end
     error "Could not find a transition for resolving an issue"
@@ -437,8 +437,8 @@ class JiraHandler
 
     availableVersions = @agent.get("#{@url}/rest/api/2/project/#{fields['project']['key']}/versions")
     availableVersions = JSON.parse(availableVersions.body).map { |v| v["name"] }.sort
-    fixVersions = prompt.select("Change fix version from #{fields['fixVersions']}", ["(no change)"] + availableVersions)
-    unless fixVersions == "(no change)"
+    fixVersion = prompt.select("Change fix version from #{fields['fixVersions']}", ["(no change)"] + availableVersions)
+    unless fixVersion == "(no change)"
       @agent.put(
         "#{@url}/rest/api/2/issue/#{@issue}",
         { "fields" => { "fixVersions" => [{ "name" => fixVersion }] } }.to_json,
@@ -452,7 +452,7 @@ class JiraHandler
     unless priority == "(no change)"
       @agent.put(
         "#{@url}/rest/api/2/issue/#{@issue}",
-        { "fields" => { "priority" => { "name" => fixVersion } } }.to_json,
+        { "fields" => { "priority" => { "name" => priority } } }.to_json,
         'Content-Type' => 'application/json'
       )
     end
@@ -490,12 +490,18 @@ class JiraHandler
     out << "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components} #{url}"
 
     if detailed
-      if l = i['labels']
-        out << "Labels: #{Paint[l.join(', '), "red"]}"
+      unless (l = i['labels']).empty?
+        out << "Labels: #{Paint[l.join(', '), "brown"]}"
       end
 
+      unless (f = i['fixVersions'].map { |v| v['name'] }).empty?
+        out << "Fix by: #{Paint[f.join(', '), "brown"]}"
+      end
+
+      out << "Priority: #{Paint[i['priority']['name'], "brown"]}"
+
       if i['description']
-        out << Paint["#{i['description']}\n"]
+        out << "\nDescription:" << Paint["#{i['description']}\n"]
       end
 
       (i["comment"]&.[]("comments") || []).each do |comment|
@@ -545,8 +551,6 @@ class JiraHandler
       data.to_json,
       'Content-Type' => 'application/json'
     )
-    results = JSON.parse(page.body)
-    puts(results)
 
     log("Assigning to me")
     data = {
@@ -559,8 +563,6 @@ class JiraHandler
       data.to_json,
       'Content-Type' => 'application/json'
     )
-    results = JSON.parse(page.body)
-    puts(results)
   end
 
   def start(jira_page)
