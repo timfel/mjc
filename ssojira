@@ -139,7 +139,7 @@ class JiraHandler
   end
 
   def list_issues(*jql)
-    page = @agent.get("#{@url}/rest/api/latest/search?jql=#{jql.join('+AND+')}")
+    page = @agent.get("#{@url}/rest/api/2/search?jql=#{jql.join('+AND+')}")
     results = JSON.parse(page.body)
     results["issues"].map do |issue|
       format_issue(issue)
@@ -162,7 +162,7 @@ class JiraHandler
     window_name = `xdotool selectwindow getwindowname`.chomp
 
     users.each do |user|
-      page = @agent.get("#{@url}/rest/api/latest/search?jql=updated >%3D -1w AND assignee in (#{user}) AND component = Python ORDER BY status DESC")
+      page = @agent.get("#{@url}/rest/api/2/search?jql=updated >%3D -1w AND assignee in (#{user}) AND component = Python ORDER BY status DESC")
       results = JSON.parse(page.body)
 
       system "xdotool search --name '#{window_name}' key Return Return"
@@ -189,7 +189,7 @@ class JiraHandler
 
   def find_transition(*names)
     # try to find transitions by common names
-    page = @agent.get("#{@url}/rest/api/latest/issue/#{@issue}/transitions")
+    page = @agent.get("#{@url}/rest/api/2/issue/#{@issue}/transitions")
     transitions = JSON.parse(page.body)["transitions"]
     names.each do |name|
       tid = transitions.find { |t| t["name"].downcase =~ name.downcase }
@@ -225,7 +225,7 @@ class JiraHandler
     }
 
     page = @agent.post(
-      "#{@url}/rest/api/latest/issue/#{@issue}/transitions",
+      "#{@url}/rest/api/2/issue/#{@issue}/transitions",
       data.to_json,
       'Content-Type' => 'application/json'
     )
@@ -342,7 +342,7 @@ class JiraHandler
     }
 
     page = @agent.post(
-      "#{@url}/rest/api/latest/issue",
+      "#{@url}/rest/api/2/issue",
       data.to_json,
       'Content-Type' => 'application/json'
     )
@@ -413,8 +413,9 @@ class JiraHandler
   end
 
   def show(jira_page, detailed: true)
-    page = @agent.get("#{@url}/rest/api/latest/search?jql=key=#{@issue}&fields=*all")
+    page = @agent.get("#{@url}/rest/api/2/search?jql=key=#{@issue}&fields=*all")
     results = JSON.parse(page.body)
+    log(results)
     print_issue(results["issues"][0], detailed: detailed)
   end
 
@@ -428,7 +429,7 @@ class JiraHandler
       if potential_issue_branch =~ /([a-zA-Z0-9]+\-[0-9]+)/
         potential_issue_name = $1
         begin
-          page = @agent.get("#{@url}/rest/api/latest/search?jql=key=#{potential_issue_name}")
+          page = @agent.get("#{@url}/rest/api/2/search?jql=key=#{potential_issue_name}")
         rescue
           next
         end
@@ -465,7 +466,7 @@ class JiraHandler
         ts = Time.at(`git log -1 --pretty=%at #{selected_tag}`.chomp.to_i)
       end
       tsjql = ts.strftime("%Y/%m/%d %H:%M")
-      page = @agent.get("#{@url}/rest/api/latest/search?jql=updated>='#{tsjql}'%20AND%20resolution%20is%20not%20EMPTY%20AND%20component=#{@components}")
+      page = @agent.get("#{@url}/rest/api/2/search?jql=updated>='#{tsjql}'%20AND%20resolution%20is%20not%20EMPTY%20AND%20component=#{@components}")
       results = JSON.parse(page.body)
       issues = results["issues"]
       if issues
