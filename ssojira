@@ -340,7 +340,7 @@ class JiraHandler
   end
 
   def comment(jira_page)
-    comment = prompt.multiline("Enter comment (or nothing to cancel):").join
+    comment = prompt.multiline("Enter comment (or nothing to not post a comment):").join
     return if comment.empty?
     post_comment(jira_page, comment)
   end
@@ -401,12 +401,13 @@ class JiraHandler
     log(results)
 
     issue = results["issues"][0]
+    fields = issue["fields"]
 
-    title = prompt.ask("Title:", default: issue['summary'])
+    title = prompt.ask("Title:", default: fields['summary'])
     return unless title && !title.empty?
-    components = prompt.ask("Components (comma-separated):", default: issue["components"].join(","))
-    type = prompt.ask("Type (Bug, Improvement, Task, New Feature, ...)", default: issue["issuetype"]["name"])
-    labels = prompt.ask("Labels (comma-separated, e.g. peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation): ", default: issue["labels"].join(",")).split(",").map(&:strip)
+    components = prompt.ask("Components:", default: fields['components'].map { |c| c["name"] }.join(','))
+    type = prompt.ask("Type:", default: fields['issuetype']['name'])
+    labels = prompt.ask("Labels from peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation:", default: fields['labels'].join(',')).split(",").map(&:strip)
 
     data = {
       "fields" => {
@@ -425,13 +426,9 @@ class JiraHandler
       'Content-Type' => 'application/json'
     )
 
-    results = JSON.parse(page.body)
-    puts(results)
-    results
-
     comment(jira_page)
 
-    selection = prompt.select("Change state ", ["(no)", "Start progress", "Stop progress", "Resolve"])
+    selection = prompt.select("Change state from #{fields['status']['name']}? ", ["(no)", "Start progress", "Stop progress", "Resolve"])
     case selection
     when "Start progress"
       just_start(jira_page)
