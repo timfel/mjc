@@ -310,10 +310,16 @@ class JiraHandler
   end
 
   def post_comment(jira_page, comment)
-    comment_form = jira_page.form_with(action: /AddComment/)
-    comment_text = comment_form.field_with(name: "comment")
-    comment_text.value = comment
-    comment_form.submit
+    data = { "body" => comment }
+
+    page = @agent.post(
+      "#{@url}/rest/api/2/issue/#{@issue}/comment",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+
+    results = JSON.parse(page.body)
+    puts(results)
   end
 
   def new_issue(jira_page, title: nil, body: nil)
