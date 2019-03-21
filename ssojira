@@ -327,13 +327,14 @@ class JiraHandler
     project = prompt.ask("Enter project:", default: @project)
     components = prompt.ask("Enter components (comma-separated):", default: @components)
     type = prompt.ask("Enter issue type (Bug, Improvement, Task, New Feature, ...)", default: "Bug")
-    # labels = prompt.ask("Enter issue labels (comma-separated, e.g. peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation): ", default: "")
+    labels = prompt.ask("Enter issue labels (comma-separated, e.g. peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation): ", default: "generic").split(",").map(&:strip)
 
     data = {
       "fields" => {
         "project" => {"key" => project},
         "components" => components.split(",").map { |c| {"name" => c} },
         "summary" => title,
+        "labels" => labels,
         "description" => body,
         "issuetype" => {
           "name" => type,
@@ -370,12 +371,16 @@ class JiraHandler
     out << "#{key} '#{i['summary']}' -#{i['reporter']['displayName']} #{components} #{url}"
 
     if detailed
+      if l = i['labels']
+        out << "Labels: #{Paint[l.join(', '), "red"]}"
+      end
+
       if i['description']
-        out << Paint["#{i['description']}\n", :white]
+        out << Paint["#{i['description']}\n"]
       end
 
       (i["comment"]&.[]("comments") || []).each do |comment|
-        author = Paint["#{comment['author']['displayName']}", :white]
+        author = Paint["#{comment['author']['displayName']}", "gray"]
         body = Paint[comment['body']]
         out << "#{author}: #{body}\n\n"
       end
