@@ -403,28 +403,59 @@ class JiraHandler
     issue = results["issues"][0]
     fields = issue["fields"]
 
-    title = prompt.ask("Title:", default: fields['summary'])
-    return unless title && !title.empty?
-    components = prompt.ask("Components:", default: fields['components'].map { |c| c["name"] }.join(','))
-    type = prompt.ask("Type:", default: fields['issuetype']['name'])
-    labels = prompt.ask("Labels from peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation:", default: fields['labels'].join(',')).split(",").map(&:strip)
+    curTitle = fields['summary']
+    title = prompt.ask("Title:", default: curTitle)
 
-    data = {
-      "fields" => {
-        "components" => components.split(",").map { |c| {"name" => c} },
-        "summary" => title,
-        "labels" => labels,
-        "issuetype" => {
-          "name" => type,
-        },
+    curComp = fields['components'].map { |c| c["name"] }.join(',')
+    components = prompt.ask("Components:", default: curComp)
+
+    curType = fields['issuetype']['name']
+    type = prompt.ask("Type:", default: curType)
+
+    curLab = fields['labels'].join(',')
+    labels = prompt.ask("Labels from peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation:", default: curLab).split(",").map(&:strip)
+
+    unless title == curTitle && components == curComp && type == curType && labels == curLab
+      data = {
+        "fields" => {
+          "components" => components.split(",").map { |c| {"name" => c} },
+          "summary" => title,
+          "labels" => labels,
+          "issuetype" => {
+            "name" => type,
+          }
+        }
       }
-    }
+      page = @agent.put(
+        "#{@url}/rest/api/2/issue/#{@issue}",
+        data.to_json,
+        'Content-Type' => 'application/json'
+      )
+    else
+      log("No updates")
+    end
 
-    page = @agent.put(
-      "#{@url}/rest/api/2/issue/#{@issue}",
-      data.to_json,
-      'Content-Type' => 'application/json'
-    )
+    availableVersions = @agent.get("#{@url}/rest/api/2/project/#{fields['project']['key']}/versions")
+    availableVersions = JSON.parse(availableVersions.body).map { |v| v["name"] }.sort
+    fixVersions = prompt.select("Change fix version from #{fields['fixVersions']}", ["(no change)"] + availableVersions)
+    unless fixVersions == "(no change)"
+      @agent.put(
+        "#{@url}/rest/api/2/issue/#{@issue}",
+        { "fields" => { "fixVersions" => [{ "name" => fixVersion }] } }.to_json,
+        'Content-Type' => 'application/json'
+      )
+    end
+
+    availablePrios = @agent.get("#{@url}/rest/api/2/priority")
+    availablePrios = JSON.parse(availablePrios.body).map { |v| v["name"] }.sort
+    priority = prompt.select("Change priority from #{fields['priority']}", ["(no change)"] + availablePrios)
+    unless priority == "(no change)"
+      @agent.put(
+        "#{@url}/rest/api/2/issue/#{@issue}",
+        { "fields" => { "priority" => { "name" => fixVersion } } }.to_json,
+        'Content-Type' => 'application/json'
+      )
+    end
 
     comment(jira_page)
 
