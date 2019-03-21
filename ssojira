@@ -400,14 +400,48 @@ class JiraHandler
       selection = prompt.select("Start working on what?", issue_list, per_page:  15)
       exit if selection == issue_list[0]
       @issue = /([A-Z]+-\d+)/.match(selection)[1]
-      return go
+
+      # we might have been called through another action, so when we restart,
+      # run only this action and return to the caller
+      begin
+        act = @action
+        @action = :just_start
+        return go
+      ensure
+        @action = act
+      end
     end
+
     require_issue(jira_page)
     yield if block_given?
+
     log("Starting progress")
-    jira_page.link_with(:text => "Start Progress")&.click
+    data = {
+      "transition" => {
+        "id" => find_start_transition["id"]
+      }
+    }
+    page = @agent.post(
+      "#{@url}/rest/api/2/issue/#{@issue}/transitions",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+    results = JSON.parse(page.body)
+    puts(results)
+
     log("Assigning to me")
-    jira_page.link_with(:text => "Assign to me")&.click
+    data = {
+      "assignee" => {
+        "name" => "#{@username}"
+      }
+    }
+    page = @agent.post(
+      "#{@url}/rest/api/2/issue/#{@issue}",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+    results = JSON.parse(page.body)
+    puts(results)
   end
 
   def start(jira_page)
