@@ -206,12 +206,18 @@ class JiraHandler
     find_transition("start progress", "start")
   end
 
+  def find_stop_transition
+    find_transition("stop progress", "stop")
+  end
+
   def resolve(jira_page)
-    issue_list = ["(cancel)"]
-    issue_list += list_issues(ASSIGNED_TO_ME)
-    selection = prompt.select("Resolve what?", issue_list, per_page: 15)
-    exit if selection == issue_list[0]
-    @issue = /([A-Z]+-\d+)/.match(selection)[1]
+    unless @issue
+      issue_list = ["(cancel)"]
+      issue_list += list_issues(ASSIGNED_TO_ME)
+      selection = prompt.select("Resolve what?", issue_list, per_page: 15)
+      exit if selection == issue_list[0]
+      @issue = /([A-Z]+-\d+)/.match(selection)[1]
+    end
 
     data = {
       "fields" => {
@@ -221,6 +227,36 @@ class JiraHandler
       },
       "transition" => {
         "id" => find_resolve_transition["id"]
+      }
+    }
+
+    page = @agent.post(
+      "#{@url}/rest/api/2/issue/#{@issue}/transitions",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+
+    results = JSON.parse(page.body)
+    puts(results)
+  end
+
+  def stop_progress(jira_page)
+    unless @issue
+      issue_list = ["(cancel)"]
+      issue_list += list_issues(ASSIGNED_TO_ME)
+      selection = prompt.select("Stop progress on what?", issue_list, per_page: 15)
+      exit if selection == issue_list[0]
+      @issue = /([A-Z]+-\d+)/.match(selection)[1]
+    end
+
+    data = {
+      "fields" => {
+        "resolution" => {
+          "name" => "Fixed"
+        }
+      },
+      "transition" => {
+        "id" => find_stop_transition["id"]
       }
     }
 
@@ -357,6 +393,55 @@ class JiraHandler
     results = JSON.parse(page.body)
     puts(results)
     results
+  end
+
+  def edit_issue(jira_page)
+    page = @agent.get("#{@url}/rest/api/2/search?jql=key=#{@issue}&fields=*all")
+    results = JSON.parse(page.body)
+    log(results)
+
+    issue = results["issues"][0]
+
+    title = prompt.ask("Title:", default: issue['summary'])
+    return unless title && !title.empty?
+    components = prompt.ask("Components (comma-separated):", default: issue["components"].join(","))
+    type = prompt.ask("Type (Bug, Improvement, Task, New Feature, ...)", default: issue["issuetype"]["name"])
+    labels = prompt.ask("Labels (comma-separated, e.g. peak,startup,footprint,compatibility,security,platform,usability,cleanup,generic,documentation): ", default: issue["labels"].join(",")).split(",").map(&:strip)
+
+    data = {
+      "fields" => {
+        "components" => components.split(",").map { |c| {"name" => c} },
+        "summary" => title,
+        "labels" => labels,
+        "issuetype" => {
+          "name" => type,
+        },
+      }
+    }
+
+    page = @agent.put(
+      "#{@url}/rest/api/2/issue/#{@issue}",
+      data.to_json,
+      'Content-Type' => 'application/json'
+    )
+
+    results = JSON.parse(page.body)
+    puts(results)
+    results
+
+    comment(jira_page)
+
+    selection = prompt.select("Change state ", ["(no)", "Start progress", "Stop progress", "Resolve"])
+    case selection
+    when "Start progress"
+      just_start(jira_page)
+    when "Stop progress"
+      stop_progress
+    when "Resolve"
+      resolve
+    else
+      log("Not changing state")
+    end
   end
 
   def print_issue(issue, detailed: false)
@@ -589,6 +674,10 @@ class JiraHandler
       opts.on("-g", "--github [URL]", "Import PR/issue from github, create Jira issue and PR") do |url, v|
         jira.action = :github
         jira.github_url = url
+      end
+
+      opts.on("-e", "--edit", "Edit an issue") do |v|
+        jira.action = :edit_issue
       end
 
       opts.on("-c", "--comment", "Post a comment") do |v|
