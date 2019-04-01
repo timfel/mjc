@@ -558,7 +558,7 @@ class JiraHandler
         "name" => "#{@username}"
       }
     }
-    page = @agent.post(
+    page = @agent.put(
       "#{@url}/rest/api/2/issue/#{@issue}",
       data.to_json,
       'Content-Type' => 'application/json'
