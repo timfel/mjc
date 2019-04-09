@@ -237,7 +237,7 @@ class JiraHandler
     )
 
     results = JSON.parse(page.body)
-    puts(results)
+    show_issue_by_key({ 'key' => @issue })
   end
 
   def stop_progress(jira_page)
@@ -267,7 +267,7 @@ class JiraHandler
     )
 
     results = JSON.parse(page.body)
-    puts(results)
+    show_issue_by_key({ 'key' => @issue })
   end
 
   def github(jira_page)
@@ -355,7 +355,7 @@ class JiraHandler
     )
 
     results = JSON.parse(page.body)
-    puts(results)
+    show_issue_by_key({ 'key' => @issue })
   end
 
   def new_issue(jira_page, title: nil, body: nil)
@@ -391,7 +391,7 @@ class JiraHandler
     )
 
     results = JSON.parse(page.body)
-    puts(results)
+    show_issue_by_key(results)
     results
   end
 
@@ -570,6 +570,13 @@ class JiraHandler
       systemx "git checkout master && git pull"
       systemx "git checkout -b topic/#{@issue}"
     end
+  end
+
+  def show_issue_by_key(json)
+    page = @agent.get("#{@url}/rest/api/2/search?jql=key=#{json['key']}&fields=*all")
+    results = JSON.parse(page.body)
+    log(results)
+    print_issue(results["issues"][0], detailed: false)
   end
 
   def show(jira_page, detailed: true)
