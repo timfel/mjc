@@ -553,13 +553,9 @@ class JiraHandler
     )
 
     log("Assigning to me")
-    data = {
-      "assignee" => {
-        "name" => "#{@username}"
-      }
-    }
+    data = { "name" => "#{@username}" }
     page = @agent.put(
-      "#{@url}/rest/api/2/issue/#{@issue}",
+      "#{@url}/rest/api/2/issue/#{@issue}/assignee",
       data.to_json,
       'Content-Type' => 'application/json'
     )
