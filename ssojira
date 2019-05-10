@@ -275,7 +275,7 @@ class JiraHandler
       pr = Github::Client::PullRequests.new.get user: ghuser, repo: ghrepo, number: prid.to_i
       pr.title
       internal_issue = new_issue(jira_page, title: "Github issue #{prid}: #{pr.title}", body: <<-EOF)
-      From #{pr.user.login}:
+      From #{pr.user.login}, #{@github_url}:
       {quote}
       #{pr.to_h['body']}
       {quote}
@@ -291,7 +291,7 @@ class JiraHandler
       pr = Github::Client::Issues.new.get user: ghuser, repo: ghrepo, number: prid.to_i
       pr.title
       internal_issue = new_issue(jira_page, title: "Github issue #{prid}: #{pr.title}", body: <<-EOF)
-      From #{pr.user.login}:
+      From #{pr.user.login}, #{@github_url}:
       {quote}
       #{pr.to_h['body']}
       {quote}
